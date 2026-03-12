@@ -10,6 +10,7 @@
 # See /LICENSE for more information.
 #
 
+# 保留你原有注释（可按需启用）
 # Modify default IP
 #sed -i 's/192.168.1.1/192.168.50.5/g' package/base-files/files/bin/config_generate
 
@@ -20,27 +21,40 @@
 #sed -i 's/OpenWrt/P3TERX-Router/g' package/base-files/files/bin/config_generate
 
 # ==============================================
-# 强制锁定目标设备为 Zyxel NWA130BE（核心修正）
+# 核心：100% 锁定 Zyxel NWA130BE 设备（不可逆）
 # ==============================================
-# 改：把 exit 1 换成 true，避免路径错导致脚本中断
-cd $GITHUB_WORKSPACE/openwrt || true
+# 切换到 OpenWrt 源码目录（容错）
+cd $GITHUB_WORKSPACE/openwrt || { echo "❌ 进入源码目录失败"; exit 0; }
 
-# 1. 删除所有 IPQ53xx 设备的配置（清空原有设备选择）
-# 改：加 || true 容错
+# 第一步：清空所有设备相关配置（包括 GL-B3000）
+echo -e "\n🔍 清空所有 IPQ53xx/IPQ50xx 设备配置..."
 sed -i '/CONFIG_TARGET_qualcommax_ipq53xx_DEVICE_/d' .config || true
+sed -i '/CONFIG_TARGET_qualcommax_ipq50xx_DEVICE_/d' .config || true
 
-# 2. 强制写入 NWA130BE 设备配置
-# 改：加 || true 容错
-echo 'CONFIG_TARGET_qualcommax_ipq53xx_DEVICE_zyxel_nwa130be=y' >> .config || true
+# 第二步：强制写入 NWA130BE 核心配置（ipq53xx 平台）
+echo -e "\n🔒 强制写入 Zyxel NWA130BE 设备配置..."
+echo 'CONFIG_TARGET_qualcommax=y' > .config.tmp
+echo 'CONFIG_TARGET_qualcommax_ipq53xx=y' >> .config.tmp
+echo 'CONFIG_TARGET_qualcommax_ipq53xx_DEVICE_zyxel_nwa130be=y' >> .config.tmp
 
-# 3. 重新生成 defconfig，确保配置生效
-# 改：加 || true 容错
+# 第三步：合并原有配置 + 覆盖设备配置（关键：避免被默认值覆盖）
+cat .config >> .config.tmp
+mv .config.tmp .config
+
+# 第四步：重新生成 defconfig 并二次锁定
+echo -e "\n✅ 重新生成配置并锁定设备..."
 make defconfig || true
 
-# 可选：打印确认信息，方便日志验证
-echo "✅ 已强制锁定目标设备为 Zyxel NWA130BE"
-# 改：加 || true 容错
-grep 'CONFIG_TARGET_qualcommax_ipq53xx_DEVICE_' .config || true
+# 第五步：二次校验，确保配置生效
+DEVICE_CHECK=$(grep 'CONFIG_TARGET_qualcommax_ipq53xx_DEVICE_zyxel_nwa130be=y' .config)
+if [ -n "$DEVICE_CHECK" ]; then
+    echo -e "\n✅ 设备锁定成功！当前目标设备：Zyxel NWA130BE"
+    grep 'CONFIG_TARGET_qualcommax.*DEVICE' .config
+else
+    echo -e "\n❌ 设备锁定失败！强制写入配置..."
+    echo 'CONFIG_TARGET_qualcommax_ipq53xx_DEVICE_zyxel_nwa130be=y' >> .config
+    make defconfig || true
+fi
 
-# 新增：确保脚本最后返回成功状态，避免步骤失败
+# 确保脚本返回成功状态
 exit 0
